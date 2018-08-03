@@ -126,7 +126,6 @@ func handleConn(client net.Conn, timeout time.Duration) {
 	port := strconv.Itoa(int(buf[n-2])<<8 | int(buf[n-1]))
 	addr := net.JoinHostPort(host, port)
 
-	log.Printf("addr: %s\n", addr)
 	server, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		log.Printf("dail to [%s] failed: %v\n", addr, err)

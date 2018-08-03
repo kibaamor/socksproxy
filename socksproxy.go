@@ -85,55 +85,83 @@ func handleConn(client net.Conn, timeout time.Duration) {
 		log.Printf("read error: %v\n", err)
 		return
 	}
-	if n < 3 {
-		log.Println("invalid auth request")
-		return
-	}
-	if buf[0] != 0x5 {
-		log.Printf("unsupport version: %d\n", buf[0])
-		return
+
+	if n > 0 && buf[0] == 0x5 {
+		client.Write([]byte{0x5, 0x0})
+
+		n, err = client.Read(buf[:])
+		if err != nil {
+			log.Printf("read error: %v\n", err)
+			return
+		}
+		if n < 7 {
+			log.Println("invalid command request")
+			return
+		}
 	}
 
-	client.Write([]byte{0x5, 0x0})
-
-	n, err = client.Read(buf[:])
-	if err != nil {
-		log.Printf("read error: %v\n", err)
-		return
-	}
-	if n < 7 {
-		log.Println("invalid command request")
-		return
-	}
-	if buf[1] != 0x1 {
+	if n > 1 && buf[1] != 0x1 { // not CONNECT
 		log.Printf("unsupport command: %d\n", buf[1])
-		return
 	}
 
 	var host string
-	switch buf[3] {
-	case 0x1: // ipv4
-		host = net.IPv4(buf[4], buf[5], buf[6], buf[7]).String()
-	case 0x3: // domain
-		host = string(buf[5 : 5+buf[4]])
-	case 0x4: // ipv6
-		host = net.IP{
-			buf[4], buf[5], buf[6], buf[7],
-			buf[8], buf[9], buf[10], buf[11],
-			buf[12], buf[13], buf[14], buf[15],
-			buf[16], buf[17], buf[18], buf[19]}.String()
+	var port string
+	switch {
+	case n > 8 && buf[0] == 0x4: // socks4 or socks4a
+		port = strconv.Itoa(int(buf[2])<<8 | int(buf[3]))
+		var i int
+		for i = 8; i < n; i++ {
+			if buf[i] == 0 {
+				break
+			}
+		}
+		if i+1 < n { // socks4a
+			host = string(buf[i+1 : n-1])
+		} else { // socks4
+			host = net.IPv4(buf[4], buf[5], buf[6], buf[7]).String()
+		}
+	case n > 5 && buf[0] == 0x5: // socks5
+		switch {
+		case n > 9 && buf[3] == 0x1: // ipv4
+			host = net.IPv4(buf[4], buf[5], buf[6], buf[7]).String()
+		case n > 6+int(buf[4]) && buf[3] == 0x3: // domain
+			host = string(buf[5 : 5+buf[4]])
+		case n > 21 && buf[3] == 0x4: // ipv6
+			host = net.IP{
+				buf[4], buf[5], buf[6], buf[7],
+				buf[8], buf[9], buf[10], buf[11],
+				buf[12], buf[13], buf[14], buf[15],
+				buf[16], buf[17], buf[18], buf[19]}.String()
+		default:
+			log.Println("invalid sock5 request")
+			return
+		}
+		port = strconv.Itoa(int(buf[n-2])<<8 | int(buf[n-1]))
+	default:
+		log.Printf("unsupport version: %d or invalid request\n", buf[0])
+		return
 	}
-	port := strconv.Itoa(int(buf[n-2])<<8 | int(buf[n-1]))
-	addr := net.JoinHostPort(host, port)
 
+	addr := net.JoinHostPort(host, port)
+	log.Printf("addr: %s\n", addr)
 	server, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
-		log.Printf("dail to [%s] failed: %v\n", addr, err)
+		log.Printf("dial to [%s] failed: %v\n", addr, err)
 		return
 	}
 	defer server.Close()
 
-	client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+	if buf[0] == 0x4 {
+		reply := []byte{0x0, 0x5a, buf[2], buf[3], 0x0, 0x0, 0x0, 0x0}
+		ip := net.ParseIP(server.RemoteAddr().String()).To4()
+		if ip != nil {
+			copy(reply[4:], ip)
+		}
+		client.Write(reply)
+	} else {
+		client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+	}
+
 	go io.Copy(client, server)
 	io.Copy(server, client)
 }

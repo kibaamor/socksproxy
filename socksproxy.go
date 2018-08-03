@@ -124,7 +124,7 @@ func handleConn(client net.Conn, timeout time.Duration, debug bool) {
 			version = "socks4a"
 		} else { // socks4
 			host = net.IPv4(buf[4], buf[5], buf[6], buf[7]).String()
-			version = "socks4"
+			version = "socks4 "
 		}
 	case n > 5 && buf[0] == 0x5: // socks5
 		switch {
@@ -143,7 +143,7 @@ func handleConn(client net.Conn, timeout time.Duration, debug bool) {
 			return
 		}
 		port = strconv.Itoa(int(buf[n-2])<<8 | int(buf[n-1]))
-		version = "socks5"
+		version = "socks5 "
 	default:
 		log.Printf("unsupport version: %d or invalid request\n", buf[0])
 		return
@@ -151,7 +151,7 @@ func handleConn(client net.Conn, timeout time.Duration, debug bool) {
 
 	addr := net.JoinHostPort(host, port)
 	if debug {
-		log.Printf("version: %s, addr: %s\n", version, addr)
+		log.Printf("[%s] %s ==> %s\n", version, client.RemoteAddr().String(), addr)
 	}
 	server, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
